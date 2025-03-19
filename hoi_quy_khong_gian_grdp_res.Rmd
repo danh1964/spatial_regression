@@ -1,0 +1,395 @@
+---
+title: "Xây dựng các ma trận không gian của ĐBSCL"
+subtitle: "Ma trận không gian - resource"
+author: "Vo Thanh Danh"
+output:
+  html_document:
+    code_download: true
+    df_print: paged
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 4
+    number_sections: true
+    code_folding: "show"
+    theme: "cosmo"
+    highlight: "monochrome"
+  pdf_document: default
+  word_document: default
+---
+
+
+<style>
+h1.title {font-size: 18pt; color: DarkBlue;} 
+body, h1, h2, h3, h4 {font-family: "Palatino", serif;}
+body {font-size: 12pt;}
+/* Headers */
+h1,h2,h3,h4,h5,h6{font-size: 14pt; color: #00008B;}
+body {color: #333333;}
+a, a:hover {color: #8B3A62;}
+pre {font-size: 12px;}
+</style>
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# load packages và load data
+
+```{r}
+# Cài đặt và tải các thư viện cần thiết
+# install.packages(c("spatialreg", "stargazer"))
+pacman::p_load(spdep, sf, dplyr, ggplot2, here, rio, tidyr, tidyverse, spatialreg, stargazer)    
+
+# 📌 Đọc dữ liệu GRDP từ tệp Excel
+grdp <- import(here("grdp_md.xlsx"))
+
+# Kiểm tra dữ liệu
+head(grdp)
+
+```
+
+
+# Đọc ma trận không gian
+
+
+```{r}
+# 📌 Đọc ma trận trọng số không gian từ Excel
+res <- import(here("spatial_reg_data", "resource_matrix.xlsx"))
+resource_matrix <- res %>%  as.matrix()
+
+# Kiểm tra kích thước ma trận
+dim(resource_matrix)
+
+# Chuyển đổi ma trận trọng số thành danh sách trọng số không gian
+listw_resource <- mat2listw(resource_matrix, style = "W")
+
+```
+
+
+# Hồi quy OLS cơ sở (không có yếu tố không gian)
+
+```{r}
+
+# 📌 Hồi quy OLS cơ sở (không có yếu tố không gian)
+ols_model <- lm(y2023 ~ mat_do_dn_van_ld + fdi + loc , 
+                data = grdp)
+summary(ols_model)
+
+```
+
+
+# Hồi quy không gian
+
+## Kiểm tra tự tương quan không gian bằng Moran's I
+
+```{r}
+# 📌 Kiểm tra tự tương quan không gian bằng Moran's I
+moran_test <- moran.test(residuals(ols_model), listw = listw_resource)
+print(moran_test)
+
+```
+
+
+
+## Hồi quy không gian SAR (Spatial Autoregressive Model)
+
+```{r}
+# 📌 Hồi quy không gian SAR (Spatial Autoregressive Model)
+sar_model <- lagsarlm(y2023 ~ mat_do_dn_van_ld + fdi + loc, 
+                       data = grdp, listw = listw_resource)
+summary(sar_model)
+
+```
+
+
+## Hồi quy không gian SEM (Spatial Error Model)
+
+```{r}
+# 📌 Hồi quy không gian SEM (Spatial Error Model)
+sem_model <- errorsarlm(y2023 ~ mat_do_dn_van_ld + fdi + loc, 
+                         data = grdp, listw = listw_resource)
+summary(sem_model)
+
+
+```
+
+
+## Hồi quy không gian SDM (Spatial Durbin Model)
+
+```{r}
+# 📌 Hồi quy không gian SDM (Spatial Durbin Model)
+sdm_model <- lagsarlm(y2023 ~ mat_do_dn_van_ld + fdi + loc, 
+                       data = grdp, listw = listw_resource, type = "Durbin")
+summary(sdm_model)
+
+```
+
+
+## So sánh các mô hình (OLS, SAR, SEM, SDM)
+
+
+```{r}
+# 📌 So sánh các mô hình (OLS, SAR, SEM, SDM)
+stargazer(ols_model, sar_model, sem_model, sdm_model, type = "text")
+
+```
+
+
+# PHỤ LỤC
+
+## Giới thiệu về Hồi quy không gian
+
+Hồi quy không gian (Spatial Regression) là một nhánh quan trọng của kinh tế lượng không gian, dùng để xử lý các mô hình có mối quan hệ không gian giữa các đơn vị quan sát. Ba mô hình phổ biến nhất là:
+
+1. **Mô hình tự hồi quy không gian (SAR - Spatial Autoregressive Model)**
+2. **Mô hình sai số không gian (SEM - Spatial Error Model)**
+3. **Mô hình Durbin không gian (SDM - Spatial Durbin Model)**
+
+Dưới đây là mô tả chi tiết từng mô hình và sự khác biệt giữa chúng.
+
+---
+
+### **1️⃣ Mô hình SAR (Spatial Autoregressive Model)**
+Mô hình SAR giả định rằng **biến phụ thuộc của một khu vực bị ảnh hưởng trực tiếp bởi biến phụ thuộc của các khu vực lân cận**.
+
+#### **Phương trình mô hình SAR**:
+\[
+y = \rho W y + X\beta + \varepsilon
+\]
+Trong đó:
+- \( y \) là biến phụ thuộc (ví dụ: GRDP của các tỉnh).
+- \( W \) là ma trận trọng số không gian, mô tả mức độ kết nối giữa các khu vực.
+- \( \rho \) là hệ số tự hồi quy không gian (**Spatial Autoregressive Coefficient**), đo lường mức độ ảnh hưởng của giá trị biến phụ thuộc ở các khu vực lân cận lên giá trị của khu vực đang xét.
+- \( X\beta \) là tác động của các biến độc lập truyền thống (ví dụ: nhiệt độ, lượng mưa, dân số,...).
+- \( \varepsilon \) là nhiễu trắng.
+
+#### **Diễn giải**:
+- Nếu \( \rho \) có ý nghĩa thống kê và khác 0, thì biến phụ thuộc của một khu vực **bị ảnh hưởng bởi giá trị của biến phụ thuộc ở các khu vực lân cận**.
+- Khi \( \rho = 0 \), mô hình SAR trở về mô hình hồi quy OLS truyền thống.
+
+---
+
+### **2️⃣ Mô hình SEM (Spatial Error Model)**
+Mô hình SEM giả định rằng **có tương quan không gian trong sai số (error terms)** thay vì trong biến phụ thuộc.
+
+#### **Phương trình mô hình SEM**:
+\[
+y = X\beta + u
+\]
+\[
+u = \lambda W u + \varepsilon
+\]
+Trong đó:
+- \( \lambda \) là hệ số tự tương quan của phần sai số (**Spatial Error Coefficient**), đo lường mức độ tương quan không gian của sai số giữa các khu vực.
+- \( W u \) đại diện cho mối liên kết không gian trong phần dư.
+- \( \varepsilon \) là nhiễu trắng.
+
+#### **Diễn giải**:
+- Nếu \( \lambda \) có ý nghĩa thống kê, có nghĩa là **các yếu tố không gian chưa quan sát được (unobserved spatial factors) ảnh hưởng đến biến phụ thuộc**.
+- SEM phù hợp khi tồn tại các **biến chưa quan sát** có tương quan không gian mà mô hình không đưa vào.
+
+---
+
+### **3️⃣ Mô hình SDM (Spatial Durbin Model)**
+Mô hình SDM là một phiên bản mở rộng của SAR, trong đó **cả biến phụ thuộc và biến độc lập đều bị ảnh hưởng bởi không gian**.
+
+#### **Phương trình mô hình SDM**:
+\[
+y = \rho W y + X\beta + W X\theta + \varepsilon
+\]
+Trong đó:
+- \( W X \theta \) là hiệu ứng không gian của các biến độc lập (mô tả cách biến độc lập của một khu vực ảnh hưởng đến biến phụ thuộc của khu vực khác).
+- Các tham số khác tương tự SAR.
+
+#### **Diễn giải**:
+- SDM cho phép kiểm tra liệu biến độc lập của một khu vực có ảnh hưởng đến biến phụ thuộc của khu vực khác hay không (**Spatial Spillover Effects**).
+- Nếu \( \theta = 0 \), mô hình SDM trở thành mô hình SAR.
+- Nếu \( \rho = 0 \), mô hình SDM trở thành mô hình hồi quy không gian mở rộng.
+
+---
+
+### **🔍 So sánh các mô hình hồi quy không gian**
+| **Đặc điểm**            | **SAR** (Spatial Autoregressive) | **SEM** (Spatial Error) | **SDM** (Spatial Durbin) |
+|------------------------|--------------------------------|------------------------|-------------------------|
+| **Tác động không gian** | Biến phụ thuộc bị ảnh hưởng bởi giá trị của chính nó từ các khu vực lân cận | Ảnh hưởng không gian nằm ở phần sai số | Biến phụ thuộc và biến độc lập đều có tác động không gian |
+| **Hệ số quan trọng** | \( \rho \) (hệ số tự hồi quy không gian) | \( \lambda \) (hệ số tự tương quan sai số) | \( \rho \) (biến phụ thuộc), \( \theta \) (biến độc lập) |
+| **Ứng dụng phù hợp** | Khi biến phụ thuộc có tác động không gian rõ ràng | Khi có mối quan hệ không gian trong sai số do yếu tố chưa quan sát được | Khi có lan tỏa không gian từ cả biến phụ thuộc và biến độc lập |
+| **Ví dụ thực tế** | GRDP của một tỉnh bị ảnh hưởng bởi GRDP của các tỉnh lân cận | Có các yếu tố vùng chưa quan sát tác động lên GRDP | Lượng đầu tư và nhân lực của một tỉnh ảnh hưởng đến tăng trưởng của tỉnh khác |
+
+---
+
+### **📌 Cách chọn mô hình phù hợp**
+1. **Bắt đầu với mô hình OLS cơ bản**, sau đó kiểm tra tự tương quan không gian bằng Moran’s I.
+2. Nếu **Moran's I của phần dư có ý nghĩa thống kê**, tức là có tác động không gian.
+   - Nếu **tự tương quan không gian nằm ở biến phụ thuộc → Chọn SAR**.
+   - Nếu **tự tương quan không gian nằm ở phần sai số → Chọn SEM**.
+   - Nếu **có cả hai loại tác động không gian → Chọn SDM**.
+3. So sánh kết quả của các mô hình SAR, SEM, SDM và chọn mô hình tốt nhất dựa trên tiêu chí thống kê như AIC, BIC, R².
+
+---
+
+### **📌 Kết luận**
+- **SAR**: Khi biến phụ thuộc có tác động không gian.
+- **SEM**: Khi phần sai số có tương quan không gian.
+- **SDM**: Khi cả biến phụ thuộc và biến độc lập có tác động không gian.
+- **Chọn mô hình tốt nhất bằng kiểm định Moran’s I và so sánh AIC/BIC**.
+
+
+## Các tiêu chí thông kê đánh giá trong mô hình hồi quy không gian
+
+Khi đánh giá mô hình hồi quy không gian (**SAR, SEM, SDM**), chúng ta thường sử dụng các tiêu chí thống kê sau:  
+
+1. **Log-Likelihood (Log-L)**  
+2. **AIC (Akaike Information Criterion)**  
+3. **BIC (Bayesian Information Criterion)**  
+4. **Sigma² (Phương sai của sai số)**  
+5. **Wald Test**  
+6. **LR Test (Likelihood Ratio Test)**  
+
+Dưới đây là giải thích chi tiết từng tiêu chí.
+
+---
+
+### **1️⃣ Log-Likelihood (Log-L)**  
+
+Log-Likelihood đo lường mức độ phù hợp của mô hình với dữ liệu bằng cách tính **xác suất của dữ liệu được quan sát dưới mô hình đã ước lượng**.
+
+#### **Công thức Log-Likelihood tổng quát**:
+\[
+\log L = \sum_{i=1}^{n} \log f(y_i | X_i, \theta)
+\]
+Trong đó:
+- \( f(y_i | X_i, \theta) \) là xác suất của giá trị quan sát \( y_i \) dựa trên mô hình.
+- \( \theta \) là các tham số mô hình cần ước lượng.
+
+#### **Ý nghĩa**:
+- Giá trị **Log-Likelihood càng cao** thì mô hình càng phù hợp với dữ liệu.
+- **SAR, SEM, SDM có thể có giá trị Log-Likelihood khác nhau**, mô hình nào có giá trị Log-Likelihood cao hơn thường được ưu tiên.
+
+---
+
+### **2️⃣ AIC (Akaike Information Criterion)**
+AIC là tiêu chí lựa chọn mô hình, **đánh đổi giữa độ phù hợp của mô hình (Log-L) và độ phức tạp của mô hình**.
+
+#### **Công thức AIC**:
+\[
+AIC = -2 \log L + 2k
+\]
+Trong đó:
+- \( \log L \) là Log-Likelihood.
+- \( k \) là số tham số ước lượng trong mô hình.
+
+#### **Ý nghĩa**:
+- **AIC càng nhỏ, mô hình càng tốt**.
+- Nếu có nhiều mô hình khác nhau (SAR, SEM, SDM), chúng ta **chọn mô hình có AIC nhỏ nhất**.
+
+---
+
+### **3️⃣ BIC (Bayesian Information Criterion)**
+BIC tương tự AIC nhưng có thêm yếu tố phạt mạnh hơn đối với số lượng tham số.
+
+#### **Công thức BIC**:
+\[
+BIC = -2 \log L + k \log(n)
+\]
+Trong đó:
+- \( n \) là số quan sát.
+- \( k \) là số tham số trong mô hình.
+
+#### **Ý nghĩa**:
+- **BIC càng nhỏ, mô hình càng tốt**.
+- **BIC phạt mạnh hơn AIC khi số lượng tham số lớn**, nên nếu mô hình có quá nhiều biến mà không cải thiện đáng kể độ phù hợp, BIC sẽ chọn mô hình đơn giản hơn.
+
+📌 **So sánh AIC & BIC**:
+- **AIC linh hoạt hơn**, ưu tiên mô hình phù hợp nhất với dữ liệu.
+- **BIC chặt chẽ hơn**, ưu tiên mô hình đơn giản nếu số quan sát lớn.
+- Khi AIC và BIC đưa ra các mô hình khác nhau, **BIC thường chọn mô hình ít tham số hơn**.
+
+---
+
+### **4️⃣ Sigma² (Phương sai của sai số)**
+Sigma² là phương sai của phần dư (residuals), thể hiện **mức độ nhiễu trong mô hình**.
+
+#### **Công thức Sigma²**:
+\[
+\sigma^2 = \frac{\sum (y_i - \hat{y}_i)^2}{n - k}
+\]
+Trong đó:
+- \( y_i \) là giá trị thực tế.
+- \( \hat{y}_i \) là giá trị dự báo từ mô hình.
+- \( n \) là số quan sát.
+- \( k \) là số tham số của mô hình.
+
+#### **Ý nghĩa**:
+- **Sigma² nhỏ → Sai số của mô hình nhỏ → Mô hình tốt hơn**.
+- Khi so sánh các mô hình, ta ưu tiên **mô hình có Sigma² nhỏ nhất**.
+
+---
+
+### **5️⃣ Wald Test**
+Wald Test kiểm tra xem một hoặc nhiều tham số của mô hình có khác 0 hay không.
+
+#### **Công thức Wald Test**:
+\[
+W = (\hat{\beta} - \beta_0)' (Var(\hat{\beta}))^{-1} (\hat{\beta} - \beta_0)
+\]
+Trong đó:
+- \( \hat{\beta} \) là ước lượng của hệ số hồi quy.
+- \( \beta_0 \) là giá trị kỳ vọng (thường là 0).
+- \( Var(\hat{\beta}) \) là phương sai của \( \hat{\beta} \).
+
+#### **Ý nghĩa**:
+- Nếu **giá trị p-value nhỏ (< 0.05)**, bác bỏ giả thuyết \( H_0 \) (biến đó có ý nghĩa thống kê).
+- Wald Test thường dùng để kiểm tra **biến không gian** (\( \rho \) trong SAR hoặc \( \lambda \) trong SEM).
+
+📌 **Ví dụ**:
+- Nếu Wald Test bác bỏ \( H_0: \rho = 0 \), thì **biến phụ thuộc có ảnh hưởng không gian** → Mô hình SAR phù hợp.
+- Nếu Wald Test bác bỏ \( H_0: \lambda = 0 \), thì **phần sai số có tự tương quan không gian** → Mô hình SEM phù hợp.
+
+---
+
+### **6️⃣ LR Test (Likelihood Ratio Test)**
+LR Test so sánh hai mô hình để xem liệu mô hình phức tạp hơn có phù hợp đáng kể hơn hay không.
+
+#### **Công thức LR Test**:
+\[
+LR = -2 (\log L_0 - \log L_1)
+\]
+Trong đó:
+- \( L_0 \) là Log-Likelihood của mô hình đơn giản.
+- \( L_1 \) là Log-Likelihood của mô hình phức tạp hơn.
+
+LR Test có phân phối **Chi-bình phương (\( \chi^2 \))** với bậc tự do bằng số tham số tăng thêm.
+
+#### **Ý nghĩa**:
+- Nếu \( LR \) có **p-value nhỏ (< 0.05)**, mô hình phức tạp hơn có ý nghĩa thống kê tốt hơn mô hình đơn giản hơn.
+- Nếu LR Test bác bỏ \( H_0 \), chúng ta **nên chọn mô hình phức tạp hơn**.
+
+📌 **Ứng dụng LR Test trong hồi quy không gian**:
+- So sánh **SAR vs OLS**: Nếu LR Test cho thấy SAR tốt hơn, thì mô hình không gian là cần thiết.
+- So sánh **SDM vs SAR**: Nếu SDM có LR Test tốt hơn SAR, ta nên dùng SDM.
+
+---
+
+### **📌 Kết luận & Ứng dụng**
+| **Tiêu chí**      | **Mục đích** | **Cách sử dụng** |
+|------------------|-------------|----------------|
+| **Log-Likelihood** | Đánh giá mức độ phù hợp của mô hình với dữ liệu | Chọn mô hình có Log-L cao nhất |
+| **AIC** | So sánh mô hình, đánh đổi độ phù hợp và độ phức tạp | Chọn mô hình có AIC thấp nhất |
+| **BIC** | Tương tự AIC nhưng phạt mạnh hơn khi có nhiều tham số | Chọn mô hình có BIC thấp nhất |
+| **Sigma²** | Đo lường độ nhiễu trong mô hình | Chọn mô hình có Sigma² thấp nhất |
+| **Wald Test** | Kiểm tra ý nghĩa thống kê của tham số | Nếu p-value < 0.05 → Biến có ý nghĩa |
+| **LR Test** | So sánh hai mô hình để chọn mô hình tốt hơn | Nếu p-value < 0.05 → Chọn mô hình phức tạp hơn |
+
+---
+
+
+
+
+
+end.
